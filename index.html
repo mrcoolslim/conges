@@ -86,12 +86,24 @@ async function show(){
 }
 
 async function home(){
-  const {data,error}=await sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').order('start_date',{ascending:false});
-  if(error)return `<div class="card">${esc(error.message)}</div>`;
+  const [l,t,m,g]=await Promise.all([
+    sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').order('start_date',{ascending:false}),
+    sb.from('teams').select('id,name').order('name'),
+    sb.from('team_members').select('team_id,user_id,p:profiles!user_id(full_name,email)'),
+    sb.from('team_managers').select('team_id,manager_id,p:profiles!manager_id(full_name,email)')]);
+  if(l.error)return `<div class="card">${esc(l.error.message)}</div>`;
+  const data=l.data,M=m.data||[],G=g.data||[];
   const mine=data.filter(r=>r.user_id===me.id);
   const today=new Date().toISOString().slice(0,10);
+  const off=new Set(data.filter(r=>r.status==='approved'&&r.start_date<=today&&r.end_date>=today).map(r=>r.user_id));
   const team=data.filter(r=>r.status==='approved'&&r.end_date>=today).sort((a,b)=>a.start_date.localeCompare(b.start_date));
-  return `<div class="card"><h2>Nouvelle demande</h2><form id="req"><div class="row">
+  const ids=new Set([...M.filter(r=>r.user_id===me.id).map(r=>r.team_id),...G.filter(r=>r.manager_id===me.id).map(r=>r.team_id)]);
+  const teams=(t.data||[]).filter(x=>ids.has(x.id)).map(x=>{
+    const mem=M.filter(r=>r.team_id===x.id),mg=G.filter(r=>r.team_id===x.id);
+    return `<div class="card"><h2>Mon équipe : ${esc(x.name)}</h2>${mg.length?`<p class="m" style="margin:0 0 6px">Manager : ${mg.map(r=>name(r.p)).join(', ')}</p>`:''}
+    ${mem.map(r=>`<div class="item"><span>${name(r.p)}${r.user_id===me.id?' <span class="m">(vous)</span>':''}</span>${off.has(r.user_id)?'<span class="badge approved">En congé</span>':'<span class="badge m">Présent</span>'}</div>`).join('')}</div>`;
+  }).join('')||'<div class="card"><h2>Mon équipe</h2><p class="m">Vous n\'êtes pas encore affecté à une équipe. Contactez le DRH.</p></div>';
+  return teams+`<div class="card"><h2>Nouvelle demande</h2><form id="req"><div class="row">
   <label>Du<input type="date" name="s" min="${today}" required></label>
   <label>Au<input type="date" name="e" min="${today}" required></label>
   <label>Type<select name="t">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label></div>
