@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gestion des congés</title>
+<style>
+:root{--bg:#f5f6f8;--c:#fff;--t:#1d2433;--m:#667085;--p:#2f5bea;--b:#e4e7ec;--ok:#16794c;--no:#b42318;--wa:#b54708}
+@media(prefers-color-scheme:dark){:root{--bg:#12151c;--c:#1b2029;--t:#e8eaf0;--m:#98a2b3;--b:#2b3240;--p:#6d8bff;--ok:#4ade80;--no:#f87171;--wa:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--t)}
+#app{max-width:920px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:16px}
+h1{font-size:20px;margin:0}h2{font-size:17px;margin:0 0 12px}h3{font-size:15px;margin:0 0 8px}
+.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:16px;margin-bottom:16px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+button,.tab{font:inherit;cursor:pointer;border:1px solid var(--b);background:var(--c);color:var(--t);border-radius:8px;padding:7px 12px}
+button.p,.tab.on{background:var(--p);color:#fff;border-color:var(--p)}
+button.s{padding:4px 9px;font-size:13px}
+button.ok{color:var(--ok);border-color:var(--ok)}button.no{color:var(--no);border-color:var(--no)}
+input,select,textarea{font:inherit;color:var(--t);background:var(--bg);border:1px solid var(--b);border-radius:8px;padding:8px 10px;width:100%}
+label{display:block;font-size:13px;color:var(--m);margin:0 0 10px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.item{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--b)}
+.item:first-of-type{border-top:0}
+.m{color:var(--m);font-size:13px}
+.badge{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor}
+.pending{color:var(--wa)}.approved{color:var(--ok)}.rejected{color:var(--no)}
+.inline{display:flex;gap:8px;align-items:center}.inline select,.inline input{width:auto;flex:1}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--t);color:var(--bg);padding:10px 16px;border-radius:8px;max-width:90%;z-index:9}
+.auth{max-width:380px;margin:8vh auto}
+a{color:var(--p);cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const sb=supabase.createClient('https://ncnyeyileuqglqxeazmz.supabase.co','sb_publishable_dKIVGY9zXUWiiYoyzIzoSA_njdxlqv-');
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const TYPES={annual:'Congé annuel',sick:'Maladie',unpaid:'Sans solde',other:'Autre'};
+const ST={pending:'En attente',approved:'Approuvée',rejected:'Refusée'};
+const ROLES={pending:'En attente',employee:'Employé',manager:'Manager',hr_admin:'DRH'};
+const fd=d=>new Date(d+'T00:00').toLocaleDateString('fr-FR');
+const name=u=>esc(u&&(u.full_name||u.email)||'?');
+let me=null,tab='home',mode='login';
+
+function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,4500)}
+async function run(p,ok){const {error}=await p;if(error){toast(error.message);return false}if(ok)toast(ok);await show();return true}
+
+async function loadMe(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){me=null;return}
+  const {data}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+  me=data||null;
+}
+
+function authHtml(){
+  const su=mode==='signup';
+  return `<div class="card auth"><h1>Gestion des congés</h1><p class="m">${su?'Créer un compte':'Connexion'}</p>
+  <form id="auth">${su?'<label>Nom complet<input name="n" required></label>':''}
+  <label>Email<input name="e" type="email" required autocomplete="email"></label>
+  <label>Mot de passe<input name="p" type="password" minlength="6" required autocomplete="${su?'new-password':'current-password'}"></label>
+  <button class="p" style="width:100%">${su?'S\'inscrire':'Se connecter'}</button></form>
+  <p class="m" style="margin:12px 0 0">${su?'Déjà un compte ?':'Pas de compte ?'} <a data-a="mode">${su?'Se connecter':'S\'inscrire'}</a></p></div>`;
+}
+
+function topbar(){
+  const mgr=me.role==='manager'||me.role==='hr_admin',hr=me.role==='hr_admin';
+  const t=(k,l)=>`<span class="tab ${tab===k?'on':''}" data-a="tab" data-x="${k}">${l}</span>`;
+  return `<header><div><h1>Gestion des congés</h1><span class="m">${name(me)} · ${ROLES[me.role]}</span></div><button data-a="out">Déconnexion</button></header>`+
+  (me.role==='pending'?'':`<div class="tabs">${t('home','Mes congés')}${mgr?t('approve','À valider'):''}${hr?t('hr','Administration'):''}</div>`);
+}
+
+async function show(){
+  const a=$('#app');
+  if(!me){a.innerHTML=authHtml();return}
+  if(me.role==='pending'){a.innerHTML=topbar()+'<div class="card"><h2>Compte en attente</h2><p>Votre compte est créé. Le DRH doit vous attribuer un rôle et une équipe avant que vous puissiez poser des congés. Revenez plus tard.</p><button data-a="refresh">Actualiser</button></div>';return}
+  if(tab==='approve'&&me.role==='employee')tab='home';
+  if(tab==='hr'&&me.role!=='hr_admin')tab='home';
+  a.innerHTML=topbar()+'<div class="card m">Chargement…</div>';
+  const h=tab==='approve'?await approve():tab==='hr'?await hr():await home();
+  a.innerHTML=topbar()+h;
+}
+
+async function home(){
+  const {data,error}=await sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').order('start_date',{ascending:false});
+  if(error)return `<div class="card">${esc(error.message)}</div>`;
+  const mine=data.filter(r=>r.user_id===me.id);
+  const today=new Date().toISOString().slice(0,10);
+  const team=data.filter(r=>r.status==='approved'&&r.end_date>=today).sort((a,b)=>a.start_date.localeCompare(b.start_date));
+  return `<div class="card"><h2>Nouvelle demande</h2><form id="req"><div class="row">
+  <label>Du<input type="date" name="s" min="${today}" required></label>
+  <label>Au<input type="date" name="e" min="${today}" required></label>
+  <label>Type<select name="t">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label></div>
+  <label>Motif (facultatif)<input name="r" maxlength="200"></label><button class="p">Envoyer la demande</button></form></div>
+  <div class="card"><h2>Mes demandes</h2>${mine.length?mine.map(r=>`<div class="item"><div>${fd(r.start_date)} → ${fd(r.end_date)}<div class="m">${TYPES[r.leave_type]}${r.reason?' · '+esc(r.reason):''}</div></div>
+  <div class="inline"><span class="badge ${r.status}">${ST[r.status]}</span>${r.status==='pending'?`<button class="s" data-a="del" data-x="${r.id}">Annuler</button>`:''}</div></div>`).join(''):'<p class="m">Aucune demande.</p>'}</div>
+  <div class="card"><h2>Congés approuvés à venir (équipe)</h2>${team.length?team.map(r=>`<div class="item"><div><b>${name(r.p)}</b><div class="m">${TYPES[r.leave_type]}</div></div><div>${fd(r.start_date)} → ${fd(r.end_date)}</div></div>`).join(''):'<p class="m">Aucun congé à venir.</p>'}</div>`;
+}
+
+async function approve(){
+  const {data,error}=await sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').eq('status','pending').order('start_date');
+  if(error)return `<div class="card">${esc(error.message)}</div>`;
+  const list=me.role==='hr_admin'?data:data.filter(r=>r.user_id!==me.id);
+  return `<div class="card"><h2>Demandes à valider</h2>${list.length?list.map(r=>`<div class="item"><div><b>${name(r.p)}</b><div class="m">${fd(r.start_date)} → ${fd(r.end_date)} · ${TYPES[r.leave_type]}${r.reason?' · '+esc(r.reason):''}</div></div>
+  <div class="inline"><button class="s ok" data-a="dec" data-x="${r.id}" data-y="approved">Approuver</button><button class="s no" data-a="dec" data-x="${r.id}" data-y="rejected">Refuser</button></div></div>`).join(''):'<p class="m">Aucune demande en attente.</p>'}</div>`;
+}
+
+async function hr(){
+  const [p,t,m,g]=await Promise.all([sb.from('profiles').select('*').order('created_at'),sb.from('teams').select('*').order('name'),sb.from('team_members').select('*'),sb.from('team_managers').select('*')]);
+  const P=p.data||[],T=t.data||[],M=m.data||[],G=g.data||[];
+  const nm=id=>name(P.find(u=>u.id===id));
+  const act=P.filter(u=>u.role!=='pending');
+  const opts=ex=>act.filter(u=>!ex.includes(u.id)).map(u=>`<option value="${u.id}">${name(u)}</option>`).join('');
+  const users=`<div class="card"><h2>Utilisateurs (${P.length})</h2>${P.map(u=>`<div class="item"><div>${name(u)}<div class="m">${esc(u.email)}</div></div>
+  <select style="width:auto" data-role="${u.id}" ${u.id===me.id?'disabled':''}>${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u.role===k?'selected':''}>${v}</option>`).join('')}</select></div>`).join('')}</div>`;
+  const teams=T.map(x=>{
+    const mem=M.filter(r=>r.team_id===x.id).map(r=>r.user_id),mg=G.filter(r=>r.team_id===x.id).map(r=>r.manager_id);
+    const chips=(ids,a)=>ids.length?ids.map(id=>`<div class="item"><span>${nm(id)}</span><button class="s" data-a="${a}" data-x="${x.id}" data-y="${id}">Retirer</button></div>`).join(''):'<p class="m">Aucun.</p>';
+    return `<div class="card"><div class="inline" style="justify-content:space-between"><h3>${esc(x.name)}</h3><button class="s no" data-a="delteam" data-x="${x.id}">Supprimer l'équipe</button></div>
+    <p class="m" style="margin:8px 0 0">Managers</p>${chips(mg,'rmmgr')}<div class="inline"><select id="g-${x.id}"><option value="">Ajouter un manager…</option>${opts(mg)}</select><button class="s" data-a="addmgr" data-x="${x.id}">Ajouter</button></div>
+    <p class="m" style="margin:14px 0 0">Membres (${mem.length})</p>${chips(mem,'rmmem')}<div class="inline"><select id="m-${x.id}"><option value="">Ajouter un membre…</option>${opts(mem)}</select><button class="s" data-a="addmem" data-x="${x.id}">Ajouter</button></div></div>`;
+  }).join('');
+  return `<div class="card"><h2>Nouvelle équipe</h2><form id="team" class="inline"><input name="n" placeholder="Nom de l'équipe" required maxlength="80"><button class="p">Créer</button></form></div>${teams}${users}`;
+}
+
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-a]');if(!b)return;
+  const a=b.dataset.a,x=b.dataset.x,y=b.dataset.y;
+  if(a==='mode'){mode=mode==='login'?'signup':'login';show()}
+  else if(a==='tab'){tab=x;show()}
+  else if(a==='out'){await sb.auth.signOut();me=null;tab='home';show()}
+  else if(a==='refresh'){await loadMe();show()}
+  else if(a==='del')run(sb.from('leave_requests').delete().eq('id',x),'Demande annulée')
+  else if(a==='dec')run(sb.from('leave_requests').update({status:y}).eq('id',x),y==='approved'?'Demande approuvée':'Demande refusée')
+  else if(a==='delteam'){if(confirm('Supprimer cette équipe ?'))run(sb.from('teams').delete().eq('id',x))}
+  else if(a==='rmmem')run(sb.from('team_members').delete().match({team_id:x,user_id:y}))
+  else if(a==='rmmgr')run(sb.from('team_managers').delete().match({team_id:x,manager_id:y}))
+  else if(a==='addmem'){const v=$('#m-'+x).value;if(v)run(sb.from('team_members').insert({team_id:x,user_id:v}))}
+  else if(a==='addmgr'){const v=$('#g-'+x).value;if(!v)return;
+    const r=await sb.from('team_managers').insert({team_id:x,manager_id:v});
+    if(r.error)return toast(r.error.message);
+    await sb.from('profiles').update({role:'manager'}).eq('id',v).eq('role','employee');
+    toast('Manager ajouté');show()}
+});
+
+document.addEventListener('change',e=>{
+  const id=e.target.dataset.role;
+  if(id)run(sb.from('profiles').update({role:e.target.value}).eq('id',id),'Rôle mis à jour');
+});
+
+document.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const f=e.target,v=Object.fromEntries(new FormData(f));
+  if(f.id==='auth'){
+    if(mode==='signup'){
+      const {data,error}=await sb.auth.signUp({email:v.e,password:v.p,options:{data:{full_name:v.n}}});
+      if(error)return toast(error.message);
+      if(!data.session)return toast('Compte créé. Vérifiez votre email pour confirmer.');
+    }else{
+      const {error}=await sb.auth.signInWithPassword({email:v.e,password:v.p});
+      if(error)return toast(error.message==='Invalid login credentials'?'Email ou mot de passe incorrect':error.message);
+    }
+    await loadMe();show();
+  }else if(f.id==='req'){
+    if(v.e<v.s)return toast('La date de fin doit être après la date de début');
+    if(await run(sb.from('leave_requests').insert({start_date:v.s,end_date:v.e,leave_type:v.t,reason:v.r||null}),'Demande envoyée'))return;
+  }else if(f.id==='team'){
+    run(sb.from('teams').insert({name:v.n.trim()}),'Équipe créée');
+  }
+});
+
+(async()=>{await loadMe();show()})();
+</script>
+</body>
+</html>
