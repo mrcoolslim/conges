@@ -9,7 +9,7 @@
 @media(prefers-color-scheme:dark){:root{--bg:#12151c;--c:#1b2029;--t:#e8eaf0;--m:#98a2b3;--b:#2b3240;--p:#6d8bff;--ok:#4ade80;--no:#f87171;--wa:#fbbf24}}
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--t)}
-#app{max-width:920px;margin:0 auto;padding:16px}
+#app{max-width:960px;margin:0 auto;padding:16px}
 header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:16px}
 h1{font-size:20px;margin:0}h2{font-size:17px;margin:0 0 12px}h3{font-size:15px;margin:0 0 8px}
 .card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:16px;margin-bottom:16px}
@@ -19,6 +19,7 @@ button.p,.tab.on{background:var(--p);color:#fff;border-color:var(--p)}
 button.s{padding:4px 9px;font-size:13px}
 button.ok{color:var(--ok);border-color:var(--ok)}button.no{color:var(--no);border-color:var(--no)}
 input,select,textarea{font:inherit;color:var(--t);background:var(--bg);border:1px solid var(--b);border-radius:8px;padding:8px 10px;width:100%}
+textarea{resize:vertical;min-height:70px}
 label{display:block;font-size:13px;color:var(--m);margin:0 0 10px}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .item{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--b)}
@@ -26,10 +27,32 @@ label{display:block;font-size:13px;color:var(--m);margin:0 0 10px}
 .m{color:var(--m);font-size:13px}
 .badge{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid currentColor}
 .pending{color:var(--wa)}.approved{color:var(--ok)}.rejected{color:var(--no)}
-.inline{display:flex;gap:8px;align-items:center}.inline select,.inline input{width:auto;flex:1}
-#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--t);color:var(--bg);padding:10px 16px;border-radius:8px;max-width:90%;z-index:9}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.inline select,.inline input{width:auto;flex:1}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--t);color:var(--bg);padding:10px 16px;border-radius:8px;max-width:90%;z-index:9;text-align:center}
 .auth{max-width:380px;margin:8vh auto}
 a{color:var(--p);cursor:pointer}
+.stat{text-align:center;padding:12px;border:1px solid var(--b);border-radius:10px}
+.stat .n{font-size:28px;font-weight:700;color:var(--p)}
+.stat .l{font-size:12px;color:var(--m);margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px}
+/* Calendrier */
+.cal{width:100%;border-collapse:collapse;font-size:13px}
+.cal th{background:var(--bg);padding:6px 4px;text-align:center;border:1px solid var(--b);font-weight:600}
+.cal td{padding:4px;border:1px solid var(--b);vertical-align:top;min-width:28px;text-align:center}
+.cal td.today{background:color-mix(in srgb,var(--p) 10%,transparent)}
+.cal td.off{background:color-mix(in srgb,var(--ok) 15%,transparent)}
+.cal .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin:1px}
+.cal-nav{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.cal-nav span{flex:1;text-align:center;font-weight:600}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--b)}
+.toggle{position:relative;width:42px;height:24px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:var(--b);border-radius:12px;cursor:pointer;transition:.2s}
+.slider:before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+input:checked+.slider{background:var(--p)}
+input:checked+.slider:before{transform:translateX(18px)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filters select{width:auto}
 </style>
 </head>
 <body>
@@ -45,9 +68,13 @@ const ST={pending:'En attente',approved:'Approuvée',rejected:'Refusée'};
 const ROLES={pending:'En attente',employee:'Employé',manager:'Manager',hr_admin:'DRH'};
 const fd=d=>new Date(d+'T00:00').toLocaleDateString('fr-FR');
 const name=u=>esc(u&&(u.full_name||u.email)||'?');
+const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const DAYS=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 let me=null,tab='home',mode='login';
+let calYear=new Date().getFullYear(),calMonth=new Date().getMonth();
+let filterYear='',filterType='';
 
-function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,4500)}
+function toast(m,dur=4500){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,dur)}
 async function run(p,ok){const {error}=await p;if(error){toast(error.message);return false}if(ok)toast(ok);await show();return true}
 
 async function loadMe(){
@@ -71,56 +98,157 @@ function topbar(){
   const mgr=me.role==='manager'||me.role==='hr_admin',hr=me.role==='hr_admin';
   const t=(k,l)=>`<span class="tab ${tab===k?'on':''}" data-a="tab" data-x="${k}">${l}</span>`;
   return `<header><div><h1>Gestion des congés</h1><span class="m">${name(me)} · ${ROLES[me.role]}</span></div><button data-a="out">Déconnexion</button></header>`+
-  (me.role==='pending'?'':`<div class="tabs">${t('home','Mes congés')}${mgr?t('approve','À valider'):''}${hr?t('hr','Administration'):''}</div>`);
+  (me.role==='pending'?'':`<div class="tabs">${t('home','Mes congés')}${mgr?t('approve','À valider'):''}${mgr?t('calendar','Calendrier'):''}${hr?t('dashboard','Tableau de bord'):''}${hr?t('hr','Administration'):''}</div>`);
 }
 
 async function show(){
   const a=$('#app');
   if(!me){a.innerHTML=authHtml();return}
-  if(me.role==='pending'){a.innerHTML=topbar()+'<div class="card"><h2>Compte en attente</h2><p>Votre compte est créé. Le DRH doit vous attribuer un rôle et une équipe avant que vous puissiez poser des congés. Revenez plus tard.</p><button data-a="refresh">Actualiser</button></div>';return}
-  if(tab==='approve'&&me.role==='employee')tab='home';
-  if(tab==='hr'&&me.role!=='hr_admin')tab='home';
+  if(me.role==='pending'){a.innerHTML=topbar()+'<div class="card"><h2>Compte en attente</h2><p>Le DRH doit vous attribuer un rôle et une équipe. Revenez plus tard.</p><button data-a="refresh">Actualiser</button></div>';return}
+  if((tab==='approve'||tab==='calendar')&&me.role==='employee')tab='home';
+  if((tab==='hr'||tab==='dashboard')&&me.role!=='hr_admin')tab='home';
   a.innerHTML=topbar()+'<div class="card m">Chargement…</div>';
-  const h=tab==='approve'?await approve():tab==='hr'?await hr():await home();
+  const h=tab==='approve'?await approve():tab==='calendar'?await calendar():tab==='dashboard'?await dashboard():tab==='hr'?await hr():await home();
   a.innerHTML=topbar()+h;
 }
 
+/* ==================== ONGLET ACCUEIL ==================== */
 async function home(){
   const [l,t,m,g]=await Promise.all([
     sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').order('start_date',{ascending:false}),
-    sb.from('teams').select('id,name').order('name'),
+    sb.from('teams').select('id,name,restrict_overlap,max_concurrent').order('name'),
     sb.from('team_members').select('team_id,user_id,p:profiles!user_id(full_name,email)'),
     sb.from('team_managers').select('team_id,manager_id,p:profiles!manager_id(full_name,email)')]);
   if(l.error)return `<div class="card">${esc(l.error.message)}</div>`;
   const data=l.data,M=m.data||[],G=g.data||[];
-  const mine=data.filter(r=>r.user_id===me.id);
+  const allYears=[...new Set(data.map(r=>r.start_date?.slice(0,4)))].sort((a,b)=>b-a);
+  let mine=data.filter(r=>r.user_id===me.id);
+  if(filterYear)mine=mine.filter(r=>r.start_date?.startsWith(filterYear));
+  if(filterType)mine=mine.filter(r=>r.leave_type===filterType);
   const today=new Date().toISOString().slice(0,10);
   const off=new Set(data.filter(r=>r.status==='approved'&&r.start_date<=today&&r.end_date>=today).map(r=>r.user_id));
-  const team=data.filter(r=>r.status==='approved'&&r.end_date>=today).sort((a,b)=>a.start_date.localeCompare(b.start_date));
+  const upcoming=data.filter(r=>r.status==='approved'&&r.end_date>=today&&r.user_id!==me.id).sort((a,b)=>a.start_date.localeCompare(b.start_date));
   const ids=new Set([...M.filter(r=>r.user_id===me.id).map(r=>r.team_id),...G.filter(r=>r.manager_id===me.id).map(r=>r.team_id)]);
   const teams=(t.data||[]).filter(x=>ids.has(x.id)).map(x=>{
     const mem=M.filter(r=>r.team_id===x.id),mg=G.filter(r=>r.team_id===x.id);
     return `<div class="card"><h2>Mon équipe : ${esc(x.name)}</h2>${mg.length?`<p class="m" style="margin:0 0 6px">Manager : ${mg.map(r=>name(r.p)).join(', ')}</p>`:''}
     ${mem.map(r=>`<div class="item"><span>${name(r.p)}${r.user_id===me.id?' <span class="m">(vous)</span>':''}</span>${off.has(r.user_id)?'<span class="badge approved">En congé</span>':'<span class="badge m">Présent</span>'}</div>`).join('')}</div>`;
-  }).join('')||'<div class="card"><h2>Mon équipe</h2><p class="m">Vous n\'êtes pas encore affecté à une équipe. Contactez le DRH.</p></div>';
+  }).join('')||'<div class="card"><h2>Mon équipe</h2><p class="m">Vous n\'êtes pas encore affecté à une équipe.</p></div>';
+  const yearOpts=allYears.map(y=>`<option value="${y}" ${filterYear===y?'selected':''}>${y}</option>`).join('');
+  const typeOpts=Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${filterType===k?'selected':''}>${v}</option>`).join('');
   return teams+`<div class="card"><h2>Nouvelle demande</h2><form id="req"><div class="row">
   <label>Du<input type="date" name="s" min="${today}" required></label>
   <label>Au<input type="date" name="e" min="${today}" required></label>
   <label>Type<select name="t">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></label></div>
   <label>Motif (facultatif)<input name="r" maxlength="200"></label><button class="p">Envoyer la demande</button></form></div>
-  <div class="card"><h2>Mes demandes</h2>${mine.length?mine.map(r=>`<div class="item"><div>${fd(r.start_date)} → ${fd(r.end_date)}<div class="m">${TYPES[r.leave_type]}${r.reason?' · '+esc(r.reason):''}</div></div>
+  <div class="card"><h2>Mes demandes</h2>
+  <div class="filters"><select id="fy"><option value="">Toutes les années</option>${yearOpts}</select>
+  <select id="ft"><option value="">Tous les types</option>${typeOpts}</select></div>
+  ${mine.length?mine.map(r=>`<div class="item"><div>${fd(r.start_date)} → ${fd(r.end_date)}<div class="m">${TYPES[r.leave_type]}${r.reason?' · '+esc(r.reason):''}</div>${r.status==='rejected'&&r.comment?`<div class="m" style="color:var(--no)">Motif refus : ${esc(r.comment)}</div>`:''}</div>
   <div class="inline"><span class="badge ${r.status}">${ST[r.status]}</span>${r.status==='pending'?`<button class="s" data-a="del" data-x="${r.id}">Annuler</button>`:''}</div></div>`).join(''):'<p class="m">Aucune demande.</p>'}</div>
-  <div class="card"><h2>Congés approuvés à venir (équipe)</h2>${team.length?team.map(r=>`<div class="item"><div><b>${name(r.p)}</b><div class="m">${TYPES[r.leave_type]}</div></div><div>${fd(r.start_date)} → ${fd(r.end_date)}</div></div>`).join(''):'<p class="m">Aucun congé à venir.</p>'}</div>`;
+  <div class="card"><h2>Congés approuvés à venir (équipe)</h2>${upcoming.length?upcoming.map(r=>`<div class="item"><div><b>${name(r.p)}</b><div class="m">${TYPES[r.leave_type]}</div></div><div>${fd(r.start_date)} → ${fd(r.end_date)}</div></div>`).join(''):'<p class="m">Aucun congé à venir.</p>'}</div>`;
 }
 
+/* ==================== ONGLET À VALIDER ==================== */
 async function approve(){
   const {data,error}=await sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').eq('status','pending').order('start_date');
   if(error)return `<div class="card">${esc(error.message)}</div>`;
   const list=me.role==='hr_admin'?data:data.filter(r=>r.user_id!==me.id);
   return `<div class="card"><h2>Demandes à valider</h2>${list.length?list.map(r=>`<div class="item"><div><b>${name(r.p)}</b><div class="m">${fd(r.start_date)} → ${fd(r.end_date)} · ${TYPES[r.leave_type]}${r.reason?' · '+esc(r.reason):''}</div></div>
-  <div class="inline"><button class="s ok" data-a="dec" data-x="${r.id}" data-y="approved">Approuver</button><button class="s no" data-a="dec" data-x="${r.id}" data-y="rejected">Refuser</button></div></div>`).join(''):'<p class="m">Aucune demande en attente.</p>'}</div>`;
+  <div class="inline">
+    <button class="s ok" data-a="dec" data-x="${r.id}" data-y="approved">Approuver</button>
+    <button class="s no" data-a="decref" data-x="${r.id}">Refuser…</button>
+  </div></div>
+  <div id="ref-${r.id}" style="display:none;padding:8px 0"><label>Motif du refus<textarea name="comment" rows="2" id="cmt-${r.id}"></textarea></label>
+  <button class="s no" data-a="decrefok" data-x="${r.id}">Confirmer le refus</button></div>`).join(''):'<p class="m">Aucune demande en attente.</p>'}</div>`;
 }
 
+/* ==================== ONGLET CALENDRIER ==================== */
+async function calendar(){
+  const [l,m,g,t]=await Promise.all([
+    sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').eq('status','approved'),
+    sb.from('team_members').select('team_id,user_id,p:profiles!user_id(full_name,email)'),
+    sb.from('team_managers').select('team_id,manager_id'),
+    sb.from('teams').select('id,name,restrict_overlap,max_concurrent').order('name')]);
+  const data=l.data||[],M=m.data||[],G=g.data||[],T=t.data||[];
+  const myTeams=new Set([...M.filter(r=>r.user_id===me.id).map(r=>r.team_id),...G.filter(r=>r.manager_id===me.id).map(r=>r.team_id)]);
+  const teams=T.filter(x=>myTeams.has(x.id));
+  const year=calYear,month=calMonth;
+  const firstDay=new Date(year,month,1);
+  const lastDay=new Date(year,month+1,0);
+  const startWd=(firstDay.getDay()+6)%7;
+  const today=new Date().toISOString().slice(0,10);
+  // par équipe, settings
+  const settingsCards=teams.map(x=>{
+    const mgTeam=G.filter(r=>r.team_id===x.id).some(r=>r.manager_id===me.id)||me.role==='hr_admin';
+    return mgTeam?`<div class="card"><h3>Paramètres : ${esc(x.name)}</h3>
+    <div class="toggle-row"><span>Restriction des absences simultanées</span>
+    <label class="toggle"><input type="checkbox" data-a="togglerestrict" data-x="${x.id}" ${x.restrict_overlap?'checked':''}><span class="slider"></span></label></div>
+    ${x.restrict_overlap?`<div class="toggle-row"><span>Absences max simultanées</span>
+    <div class="inline"><input type="number" min="1" max="20" value="${x.max_concurrent}" style="width:70px" id="mx-${x.id}">
+    <button class="s p" data-a="savemx" data-x="${x.id}">Enregistrer</button></div></div>`:''}
+    </div>`:'';
+  }).join('');
+  // calendrier par équipe
+  const calCards=teams.map(x=>{
+    const mem=M.filter(r=>r.team_id===x.id);
+    const approvedInTeam=data.filter(r=>mem.some(m=>m.user_id===r.user_id));
+    let html=`<div class="card"><h2>Calendrier : ${esc(x.name)}</h2>`;
+    html+=`<div class="cal-nav"><button class="s" data-a="calprev">‹</button><span>${MONTHS[month]} ${year}</span><button class="s" data-a="calnext">›</button></div>`;
+    html+=`<table class="cal"><tr>${DAYS.map(d=>`<th>${d}</th>`).join('')}</tr>`;
+    let day=1;const cells=startWd+lastDay.getDate();
+    for(let i=0;i<Math.ceil(cells/7);i++){
+      html+='<tr>';
+      for(let j=0;j<7;j++){
+        const idx=i*7+j;
+        if(idx<startWd||day>lastDay.getDate()){html+='<td></td>';continue;}
+        const dStr=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const offs=approvedInTeam.filter(r=>r.start_date<=dStr&&r.end_date>=dStr);
+        const isToday=dStr===today;
+        html+=`<td class="${isToday?'today':''} ${offs.length?'off':''}"><div>${day}</div>${offs.map(r=>`<span title="${name(r.p)}" class="dot"></span>`).join('')}${offs.length?`<div style="font-size:10px;color:var(--ok)">${offs.map(r=>name(r.p)).join(', ')}</div>`:''}</td>`;
+        day++;
+      }
+      html+='</tr>';
+    }
+    html+='</table></div>';
+    return html;
+  }).join('')||'<div class="card"><p class="m">Aucune équipe.</p></div>';
+  return settingsCards+calCards;
+}
+
+/* ==================== ONGLET TABLEAU DE BORD DRH ==================== */
+async function dashboard(){
+  const [l,t,m]=await Promise.all([
+    sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email)').order('start_date',{ascending:false}),
+    sb.from('teams').select('*').order('name'),
+    sb.from('team_members').select('*')]);
+  const data=l.data||[],T=t.data||[],M=m.data||[];
+  const today=new Date().toISOString().slice(0,10);
+  const ongoing=data.filter(r=>r.status==='approved'&&r.start_date<=today&&r.end_date>=today);
+  const pending=data.filter(r=>r.status==='pending');
+  const approved=data.filter(r=>r.status==='approved');
+  const rejected=data.filter(r=>r.status==='rejected');
+  const statsHtml=`<div class="stats">
+    <div class="stat"><div class="n">${ongoing.length}</div><div class="l">En congé aujourd'hui</div></div>
+    <div class="stat"><div class="n" style="color:var(--wa)">${pending.length}</div><div class="l">En attente</div></div>
+    <div class="stat"><div class="n" style="color:var(--ok)">${approved.length}</div><div class="l">Approuvées</div></div>
+    <div class="stat"><div class="n" style="color:var(--no)">${rejected.length}</div><div class="l">Refusées</div></div>
+  </div>`;
+  const byTeam=T.map(x=>{
+    const mem=new Set(M.filter(r=>r.team_id===x.id).map(r=>r.user_id));
+    const tdata=data.filter(r=>mem.has(r.user_id));
+    const tp=tdata.filter(r=>r.status==='pending').length;
+    const ton=tdata.filter(r=>r.status==='approved'&&r.start_date<=today&&r.end_date>=today).length;
+    return `<div class="item"><div><b>${esc(x.name)}</b><div class="m">${mem.size} membre(s)</div></div>
+    <div class="inline"><span class="badge approved">${ton} en congé</span><span class="badge pending">${tp} en attente</span></div></div>`;
+  }).join('')||'<p class="m">Aucune équipe.</p>';
+  const csvBtn=`<div style="margin-top:12px"><button class="p" data-a="exportcsv">⬇ Exporter CSV</button></div>`;
+  const recent=data.slice(0,20).map(r=>`<div class="item"><div><b>${name(r.p)}</b><div class="m">${fd(r.start_date)} → ${fd(r.end_date)} · ${TYPES[r.leave_type]}</div></div><span class="badge ${r.status}">${ST[r.status]}</span></div>`).join('');
+  return `<div class="card">${statsHtml}<h2>Par équipe</h2>${byTeam}${csvBtn}</div>
+  <div class="card"><h2>20 dernières demandes</h2>${recent}</div>`;
+}
+
+/* ==================== ONGLET ADMINISTRATION DRH ==================== */
 async function hr(){
   const [p,t,m,g]=await Promise.all([sb.from('profiles').select('*').order('created_at'),sb.from('teams').select('*').order('name'),sb.from('team_members').select('*'),sb.from('team_managers').select('*')]);
   const P=p.data||[],T=t.data||[],M=m.data||[],G=g.data||[];
@@ -132,13 +260,26 @@ async function hr(){
   const teams=T.map(x=>{
     const mem=M.filter(r=>r.team_id===x.id).map(r=>r.user_id),mg=G.filter(r=>r.team_id===x.id).map(r=>r.manager_id);
     const chips=(ids,a)=>ids.length?ids.map(id=>`<div class="item"><span>${nm(id)}</span><button class="s" data-a="${a}" data-x="${x.id}" data-y="${id}">Retirer</button></div>`).join(''):'<p class="m">Aucun.</p>';
-    return `<div class="card"><div class="inline" style="justify-content:space-between"><h3>${esc(x.name)}</h3><button class="s no" data-a="delteam" data-x="${x.id}">Supprimer l'équipe</button></div>
+    return `<div class="card"><div class="inline" style="justify-content:space-between"><h3>${esc(x.name)}</h3><button class="s no" data-a="delteam" data-x="${x.id}">Supprimer</button></div>
     <p class="m" style="margin:8px 0 0">Managers</p>${chips(mg,'rmmgr')}<div class="inline"><select id="g-${x.id}"><option value="">Ajouter un manager…</option>${opts(mg)}</select><button class="s" data-a="addmgr" data-x="${x.id}">Ajouter</button></div>
     <p class="m" style="margin:14px 0 0">Membres (${mem.length})</p>${chips(mem,'rmmem')}<div class="inline"><select id="m-${x.id}"><option value="">Ajouter un membre…</option>${opts(mem)}</select><button class="s" data-a="addmem" data-x="${x.id}">Ajouter</button></div></div>`;
   }).join('');
   return `<div class="card"><h2>Nouvelle équipe</h2><form id="team" class="inline"><input name="n" placeholder="Nom de l'équipe" required maxlength="80"><button class="p">Créer</button></form></div>${teams}${users}`;
 }
 
+/* ==================== EXPORT CSV ==================== */
+async function exportCSV(){
+  const {data,error}=await sb.from('leave_requests').select('*,p:profiles!user_id(full_name,email),d:profiles!decided_by(full_name,email)').order('start_date',{ascending:false});
+  if(error)return toast(error.message);
+  const rows=[['Employé','Email','Début','Fin','Type','Motif','Statut','Décidé par','Date décision','Commentaire']];
+  data.forEach(r=>rows.push([r.p?.full_name||'',r.p?.email||'',r.start_date,r.end_date,TYPES[r.leave_type]||r.leave_type,r.reason||'',ST[r.status]||r.status,r.d?.full_name||r.d?.email||'',r.decided_at?new Date(r.decided_at).toLocaleDateString('fr-FR'):'',r.comment||'']));
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
+  a.download='conges_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  toast('Export CSV téléchargé');
+}
+
+/* ==================== EVENTS ==================== */
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-a]');if(!b)return;
   const a=b.dataset.a,x=b.dataset.x,y=b.dataset.y;
@@ -148,6 +289,11 @@ document.addEventListener('click',async e=>{
   else if(a==='refresh'){await loadMe();show()}
   else if(a==='del')run(sb.from('leave_requests').delete().eq('id',x),'Demande annulée')
   else if(a==='dec')run(sb.from('leave_requests').update({status:y}).eq('id',x),y==='approved'?'Demande approuvée':'Demande refusée')
+  else if(a==='decref'){const d=$('#ref-'+x);if(d)d.style.display=d.style.display==='none'?'block':'none'}
+  else if(a==='decrefok'){
+    const cmt=$('#cmt-'+x)?.value||'';
+    run(sb.from('leave_requests').update({status:'rejected',comment:cmt}).eq('id',x),'Demande refusée')
+  }
   else if(a==='delteam'){if(confirm('Supprimer cette équipe ?'))run(sb.from('teams').delete().eq('id',x))}
   else if(a==='rmmem')run(sb.from('team_members').delete().match({team_id:x,user_id:y}))
   else if(a==='rmmgr')run(sb.from('team_managers').delete().match({team_id:x,manager_id:y}))
@@ -157,11 +303,30 @@ document.addEventListener('click',async e=>{
     if(r.error)return toast(r.error.message);
     await sb.from('profiles').update({role:'manager'}).eq('id',v).eq('role','employee');
     toast('Manager ajouté');show()}
+  else if(a==='calprev'){calMonth--;if(calMonth<0){calMonth=11;calYear--}show()}
+  else if(a==='calnext'){calMonth++;if(calMonth>11){calMonth=0;calYear++}show()}
+  else if(a==='togglerestrict'){
+    const checked=b.checked;
+    const team=await sb.from('teams').select('max_concurrent').eq('id',x).single();
+    const mx=team.data?.max_concurrent||1;
+    const {error}=await sb.rpc('update_team_settings',{p_team_id:x,p_restrict:checked,p_max:mx});
+    if(error)toast(error.message);else show();
+  }
+  else if(a==='savemx'){
+    const val=parseInt($('#mx-'+x)?.value)||1;
+    const team=await sb.from('teams').select('restrict_overlap').eq('id',x).single();
+    const r=team.data?.restrict_overlap??true;
+    const {error}=await sb.rpc('update_team_settings',{p_team_id:x,p_restrict:r,p_max:val});
+    if(error)toast(error.message);else toast('Paramètres enregistrés');
+  }
+  else if(a==='exportcsv')exportCSV();
 });
 
 document.addEventListener('change',e=>{
   const id=e.target.dataset.role;
   if(id)run(sb.from('profiles').update({role:e.target.value}).eq('id',id),'Rôle mis à jour');
+  if(e.target.id==='fy'){filterYear=e.target.value;show()}
+  if(e.target.id==='ft'){filterType=e.target.value;show()}
 });
 
 document.addEventListener('submit',async e=>{
@@ -179,6 +344,10 @@ document.addEventListener('submit',async e=>{
     await loadMe();show();
   }else if(f.id==='req'){
     if(v.e<v.s)return toast('La date de fin doit être après la date de début');
+    // vérifier conflit
+    const {data:blocker,error:ce}=await sb.rpc('check_my_leave_overlap',{p_start:v.s,p_end:v.e});
+    if(ce)return toast(ce.message);
+    if(blocker)return toast(`⚠ Période non disponible : ${blocker} est déjà en congé sur cette période dans votre équipe.`,6000);
     if(await run(sb.from('leave_requests').insert({start_date:v.s,end_date:v.e,leave_type:v.t,reason:v.r||null}),'Demande envoyée'))return;
   }else if(f.id==='team'){
     run(sb.from('teams').insert({name:v.n.trim()}),'Équipe créée');
